@@ -32,16 +32,27 @@ function getTransporter() {
     throw error;
   }
 
-  const port = Number(process.env.EMAIL_PORT || 587);
+  const host = process.env.EMAIL_HOST || "smtp.gmail.com";
+  const isGmail =
+    (process.env.EMAIL_SERVICE || "").toLowerCase() === "gmail" ||
+    host.toLowerCase() === "smtp.gmail.com";
 
+  // Nodemailer's Gmail transport selects the correct TLS/port combination;
+  // this avoids Render SMTP handshake failures caused by a mismatched 465/587
+  // setting while keeping custom SMTP hosts supported.
+  if (isGmail) {
+    return nodemailer.createTransport({
+      service: "gmail",
+      auth: { user, pass },
+    });
+  }
+
+  const port = Number(process.env.EMAIL_PORT || 587);
   return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || "smtp.gmail.com",
+    host,
     port,
     secure: process.env.EMAIL_SECURE === "true" || port === 465,
-    auth: {
-      user,
-      pass,
-    },
+    auth: { user, pass },
   });
 }
 

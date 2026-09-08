@@ -1,4 +1,5 @@
 import Donor from '../models/Donor.js';
+import Organization from '../models/Organization.js';
 import OTP from '../models/OTP.js';
 import { generateOTP, sendOTP } from '../utils/sendOTP.js';
 import generateToken from '../utils/generateToken.js';
@@ -231,16 +232,20 @@ export const login = async (req, res) => {
       });
     }
     
-    // Find donor by email or phone
-    const donor = await Donor.findOne({
+    const normalizedIdentifier = identifier.trim();
+    const accountQuery = {
       $or: [
-        { email: identifier.toLowerCase() },
-        { phone: identifier }
+        { email: normalizedIdentifier.toLowerCase() },
+        { phone: normalizedIdentifier }
       ],
       isActive: true
-    });
-    
-    if (!donor) {
+    };
+
+    // The shared login screen supports both donors and organizations.
+    let account = await Donor.findOne(accountQuery);
+    if (!account) account = await Organization.findOne(accountQuery);
+
+    if (!account) {
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -248,7 +253,7 @@ export const login = async (req, res) => {
     }
     
     // Check if verified
-    if (!donor.isVerified) {
+    if (!account.isVerified) {
       return res.status(401).json({
         success: false,
         message: 'Please verify your email/phone first'
@@ -256,7 +261,7 @@ export const login = async (req, res) => {
     }
     
     // Verify password
-    const isMatch = await donor.comparePassword(password);
+    const isMatch = await account.comparePassword(password);
     
     if (!isMatch) {
       return res.status(401).json({
@@ -266,18 +271,19 @@ export const login = async (req, res) => {
     }
     
     // Generate token
-    const token = generateToken(donor._id, donor.role);
+    const token = generateToken(account._id, account.role);
     
     res.json({
       success: true,
       message: 'Login successful',
       data: {
-        id: donor._id,
-        name: `${donor.firstName} ${donor.lastName}`,
-        email: donor.email,
-        phone: donor.phone,
-        bloodGroup: donor.bloodGroup,
-        role: donor.role,
+        id: account._id,
+        name: account.organizationName || `${account.firstName} ${account.lastName}`,
+        organizationName: account.organizationName,
+        email: account.email,
+        phone: account.phone,
+        bloodGroup: account.bloodGroup,
+        role: account.role,
         token
       }
     });
@@ -305,17 +311,21 @@ export const sendLoginOTP = async (req, res) => {
       });
     }
     
-    // Check if user exists
-    const donor = await Donor.findOne({
+    const normalizedEmail = email?.trim().toLowerCase();
+    const accountQuery = {
       $or: [
-        { email: email?.toLowerCase() },
+        { email: normalizedEmail },
         { phone }
       ],
       isActive: true,
       isVerified: true
-    });
-    
-    if (!donor) {
+    };
+
+    // Login OTP is available to donors and organizations.
+    let account = await Donor.findOne(accountQuery);
+    if (!account) account = await Organization.findOne(accountQuery);
+
+    if (!account) {
       return res.status(404).json({
         success: false,
         message: 'No account found with this email/phone'
@@ -328,7 +338,7 @@ export const sendLoginOTP = async (req, res) => {
     // Save OTP to database
     await OTP.create({
       phone,
-      email: email?.toLowerCase(),
+      email: normalizedEmail,
       otp,
       purpose: 'login'
     });
@@ -340,7 +350,8 @@ export const sendLoginOTP = async (req, res) => {
       success: true,
       message: 'Login OTP sent successfully',
       data: {
-        userId: donor._id,
+        userId: account._id,
+        role: account.role,
         phone: phone ? { sent: sendResults.sms.sent } : undefined,
         email: email ? { sent: sendResults.email.sent } : undefined
       }
@@ -393,15 +404,26 @@ export const verifyLoginOTP = async (req, res) => {
     await otpRecord.save();
     
     // Find donor
-    const donor = await Donor.findOne({
+    const normalizedEmail = email?.trim().toLowerCase();
+    let account = await Donor.findOne({
       $or: [
         { email: email?.toLowerCase() },
         { phone }
       ],
       isActive: true
     });
-    
-    if (!donor) {
+
+    if (!account) {
+      account = await Organization.findOne({
+        $or: [
+          { email: normalizedEmail },
+          { phone }
+        ],
+        isActive: true
+      });
+    }
+
+    if (!account) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
@@ -409,18 +431,19 @@ export const verifyLoginOTP = async (req, res) => {
     }
     
     // Generate token
-    const token = generateToken(donor._id, donor.role);
+    const token = generateToken(account._id, account.role);
     
     res.json({
       success: true,
       message: 'Login successful',
       data: {
-        id: donor._id,
-        name: `${donor.firstName} ${donor.lastName}`,
-        email: donor.email,
-        phone: donor.phone,
-        bloodGroup: donor.bloodGroup,
-        role: donor.role,
+        id: account._id,
+        name: account.organizationName || `${account.firstName} ${account.lastName}`,
+        organizationName: account.organizationName,
+        email: account.email,
+        phone: account.phone,
+        bloodGroup: account.bloodGroup,
+        role: account.role,
         token
       }
     });
@@ -439,19 +462,14 @@ export const verifyLoginOTP = async (req, res) => {
 // @access  Private
 export const getMe = async (req, res) => {
   try {
-    const donor = await Donor.findById(req.user.id).select('-password');
-    
-    if (!donor) {
+    if (!req.user) {
       return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
     
-    res.json({
-      success: true,
-      data: donor
-    });
+    res.json({ success: true, data: req.user });
     
   } catch (error) {
     console.error('Get profile error:', error);

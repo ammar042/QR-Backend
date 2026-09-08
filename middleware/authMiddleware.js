@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import Donor from '../models/Donor.js';
+import Organization from '../models/Organization.js';
 
 export const protect = async (req, res, next) => {
   let token;
@@ -12,8 +13,9 @@ export const protect = async (req, res, next) => {
       // Verify token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       
-      // Get user from token
-      req.user = await Donor.findById(decoded.id).select('-password');
+      // Tokens are issued for both donors and organizations.
+      const Account = decoded.role === 'organization' ? Organization : Donor;
+      req.user = await Account.findById(decoded.id).select('-password');
       
       if (!req.user) {
         return res.status(401).json({

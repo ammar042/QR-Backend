@@ -43,6 +43,7 @@ function getTransporter() {
   if (isGmail) {
     return nodemailer.createTransport({
       service: "gmail",
+      family: 4,
       auth: { user, pass },
     });
   }
@@ -51,6 +52,7 @@ function getTransporter() {
   return nodemailer.createTransport({
     host,
     port,
+    family: 4,
     secure: process.env.EMAIL_SECURE === "true" || port === 465,
     auth: { user, pass },
   });

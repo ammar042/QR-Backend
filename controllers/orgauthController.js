@@ -14,13 +14,33 @@ function generateToken(id, role) {
 
 // ── Create transporter lazily inside a function so dotenv is already loaded ──
 function getTransporter() {
+  // Support the common Render variable names as well as the names already
+  // used by this project, so a correctly configured deployment is not tied
+  // to one spelling.
+  const user = (process.env.EMAIL_USER || process.env.GMAIL_USER)?.trim();
+  const pass = (
+    process.env.EMAIL_PASS ||
+    process.env.EMAIL_PASSWORD ||
+    process.env.GMAIL_APP_PASSWORD
+  )?.trim();
+
+  if (!user || !pass) {
+    const error = new Error(
+      "Email service is not configured. Set EMAIL_USER and EMAIL_PASS on Render."
+    );
+    error.code = "EMAIL_CONFIG_MISSING";
+    throw error;
+  }
+
+  const port = Number(process.env.EMAIL_PORT || 587);
+
   return nodemailer.createTransport({
     host: process.env.EMAIL_HOST || "smtp.gmail.com",
-    port: parseInt(process.env.EMAIL_PORT || "587"),
-    secure: false,
+    port,
+    secure: process.env.EMAIL_SECURE === "true" || port === 465,
     auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
+      user,
+      pass,
     },
   });
 }
@@ -34,20 +54,23 @@ export const sendRegisterOTP = async (req, res) => {
       return res.status(400).json({ error: "All fields are required." });
     }
 
-    const exists = await Organization.findOne({ $or: [{ email }, { phone }] });
+    const normalizedEmail = email.trim().toLowerCase();
+    // Validate SMTP before doing database work so Render returns a fast,
+    // actionable response when its environment variables are missing.
+    const transporter = getTransporter();
+    const exists = await Organization.findOne({ $or: [{ email: normalizedEmail }, { phone }] });
     if (exists) {
       return res.status(400).json({ error: "Email or phone already registered." });
     }
 
-    await OTP.deleteMany({ email, purpose: "registration" });
+    await OTP.deleteMany({ email: normalizedEmail, purpose: "registration" });
 
     const otp = generateOTP();
-    await OTP.create({ email, otp, purpose: "registration" });
+    await OTP.create({ email: normalizedEmail, otp, purpose: "registration" });
 
-    // Create transporter here — dotenv is definitely loaded by now
-    await getTransporter().sendMail({
-      from: `"Blood Needer" <${process.env.EMAIL_USER}>`,
-      to: email,
+    await transporter.sendMail({
+      from: `"Blood Needer" <${process.env.EMAIL_USER || process.env.GMAIL_USER}>`,
+      to: normalizedEmail,
       subject: "Organization Registration OTP",
       html: `
         <h2>Blood Needer — Organization Registration</h2>
@@ -60,8 +83,22 @@ export const sendRegisterOTP = async (req, res) => {
 
     res.json({ message: "OTP sent to email." });
   } catch (err) {
-    console.error("sendRegisterOTP error:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("sendRegisterOTP error:", {
+      code: err.code,
+      message: err.message,
+      response: err.response,
+      command: err.command,
+    });
+
+    if (err.code === "EMAIL_CONFIG_MISSING") {
+      return res.status(503).json({ error: "Email service is not configured on the backend." });
+    }
+
+    if (["EAUTH", "ECONNECTION", "ETIMEDOUT", "ESOCKET"].includes(err.code)) {
+      return res.status(502).json({ error: "Email service could not be reached. Check the SMTP settings." });
+    }
+
+    res.status(500).json({ error: "Could not send OTP. Please try again." });
   }
 };
 
@@ -70,7 +107,7 @@ export const verifyRegisterOTP = async (req, res) => {
   try {
     const { organizationName, address, province, district, headName, phone, email, password, otp, latitude, longitude } = req.body;
 
-    const record = await OTP.findOne({ email, purpose: "registration" });
+    const record = await OTP.findOne({ email: email?.trim().toLowerCase(), purpose: "registration" });
     if (!record) return res.status(400).json({ error: "OTP not found. Please request again." });
     if (record.otp !== otp) {
       await OTP.updateOne({ _id: record._id }, { $inc: { attempts: 1 } });
@@ -89,7 +126,7 @@ export const verifyRegisterOTP = async (req, res) => {
       },
     });
 
-    await OTP.deleteMany({ email, purpose: "registration" });
+    await OTP.deleteMany({ email: email?.trim().toLowerCase(), purpose: "registration" });
 
     const token = generateToken(org._id, "organization");
 

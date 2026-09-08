@@ -1,6 +1,6 @@
 // utils/sendOTP.js
-import nodemailer from "nodemailer";
 import twilio from "twilio";
+import { sendEmail } from "./sendEmail.js";
 
 // Generate numeric OTP
 export const generateOTP = (length = 6) => {
@@ -30,20 +30,11 @@ export const sendOTP = async (phone, email, otp) => {
   // Send email if provided
   if (email) {
     try {
-      const transporter = nodemailer.createTransport({
-        service: "gmail",
-        family: 4,
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-      });
-
-      await transporter.sendMail({
-        from: `"Blood Donation System" <${process.env.EMAIL_USER}>`,
+      await sendEmail({
         to: email,
         subject: "Your Blood Donation OTP",
         text: `Your OTP for registration is: ${otp}. It will expire in 10 minutes.`,
+        html: `<p>Your OTP for registration is: <b>${otp}</b>.</p><p>It will expire in 10 minutes.</p>`,
       });
 
       console.log(`✅ OTP sent to email: ${email}`);

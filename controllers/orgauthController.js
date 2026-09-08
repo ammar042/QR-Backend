@@ -1,7 +1,7 @@
 import Organization from "../models/Organization.js";
 import OTP from "../models/OTP.js";
 import jwt from "jsonwebtoken";
-import nodemailer from "nodemailer";
+import { sendEmail } from "../utils/sendEmail.js";
 import { geocodeAddress } from "../utils/geocode.js";
 
 function generateOTP() {
@@ -10,52 +10,6 @@ function generateOTP() {
 
 function generateToken(id, role) {
   return jwt.sign({ id, role }, process.env.JWT_SECRET, { expiresIn: "7d" });
-}
-
-// ── Create transporter lazily inside a function so dotenv is already loaded ──
-function getTransporter() {
-  // Support the common Render variable names as well as the names already
-  // used by this project, so a correctly configured deployment is not tied
-  // to one spelling.
-  const user = (process.env.EMAIL_USER || process.env.GMAIL_USER)?.trim();
-  const pass = (
-    process.env.EMAIL_PASS ||
-    process.env.EMAIL_PASSWORD ||
-    process.env.GMAIL_APP_PASSWORD
-  )?.trim();
-
-  if (!user || !pass) {
-    const error = new Error(
-      "Email service is not configured. Set EMAIL_USER and EMAIL_PASS on Render."
-    );
-    error.code = "EMAIL_CONFIG_MISSING";
-    throw error;
-  }
-
-  const host = process.env.EMAIL_HOST || "smtp.gmail.com";
-  const isGmail =
-    (process.env.EMAIL_SERVICE || "").toLowerCase() === "gmail" ||
-    host.toLowerCase() === "smtp.gmail.com";
-
-  // Nodemailer's Gmail transport selects the correct TLS/port combination;
-  // this avoids Render SMTP handshake failures caused by a mismatched 465/587
-  // setting while keeping custom SMTP hosts supported.
-  if (isGmail) {
-    return nodemailer.createTransport({
-      service: "gmail",
-      family: 4,
-      auth: { user, pass },
-    });
-  }
-
-  const port = Number(process.env.EMAIL_PORT || 587);
-  return nodemailer.createTransport({
-    host,
-    port,
-    family: 4,
-    secure: process.env.EMAIL_SECURE === "true" || port === 465,
-    auth: { user, pass },
-  });
 }
 
 // POST /api/org/register/send-otp
@@ -68,9 +22,6 @@ export const sendRegisterOTP = async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    // Validate SMTP before doing database work so Render returns a fast,
-    // actionable response when its environment variables are missing.
-    const transporter = getTransporter();
     const exists = await Organization.findOne({ $or: [{ email: normalizedEmail }, { phone }] });
     if (exists) {
       return res.status(400).json({ error: "Email or phone already registered." });
@@ -81,8 +32,7 @@ export const sendRegisterOTP = async (req, res) => {
     const otp = generateOTP();
     await OTP.create({ email: normalizedEmail, otp, purpose: "registration" });
 
-    await transporter.sendMail({
-      from: `"Blood Needer" <${process.env.EMAIL_USER || process.env.GMAIL_USER}>`,
+    await sendEmail({
       to: normalizedEmail,
       subject: "Organization Registration OTP",
       html: `
@@ -92,6 +42,7 @@ export const sendRegisterOTP = async (req, res) => {
         <h1 style="letter-spacing:8px;color:#9f1239">${otp}</h1>
         <p>This OTP expires in 10 minutes.</p>
       `,
+      text: `Your Blood Needer organization registration OTP is ${otp}. It expires in 10 minutes.`,
     });
 
     res.json({ message: "OTP sent to email." });
@@ -107,7 +58,10 @@ export const sendRegisterOTP = async (req, res) => {
       return res.status(503).json({ error: "Email service is not configured on the backend." });
     }
 
-    if (["EAUTH", "ECONNECTION", "ETIMEDOUT", "ESOCKET"].includes(err.code)) {
+    if (
+      ["EAUTH", "ECONNECTION", "ETIMEDOUT", "ESOCKET"].includes(err.code) ||
+      String(err.code || "").startsWith("RESEND_")
+    ) {
       return res.status(502).json({ error: "Email service could not be reached. Check the SMTP settings." });
     }
 

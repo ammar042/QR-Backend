@@ -1,32 +1,74 @@
 import nodemailer from "nodemailer";
 
-function getTransporter() {
-  const user = process.env.EMAIL_USER?.trim();
-  const pass = process.env.EMAIL_PASS?.trim();
+function getSmtpTransporter() {
+  const user = (process.env.EMAIL_USER || process.env.GMAIL_USER)?.trim();
+  const pass = (
+    process.env.EMAIL_PASS ||
+    process.env.EMAIL_PASSWORD ||
+    process.env.GMAIL_APP_PASSWORD
+  )?.trim();
 
   if (!user || !pass) {
-    throw new Error("Email credentials are not configured");
+    const error = new Error("SMTP email credentials are not configured.");
+    error.code = "EMAIL_CONFIG_MISSING";
+    throw error;
+  }
+
+  const host = process.env.EMAIL_HOST || "smtp.gmail.com";
+  const port = Number(process.env.EMAIL_PORT || 587);
+
+  if ((process.env.EMAIL_SERVICE || "").toLowerCase() === "gmail" || host === "smtp.gmail.com") {
+    return nodemailer.createTransport({
+      service: "gmail",
+      family: 4,
+      auth: { user, pass },
+    });
   }
 
   return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || "smtp.gmail.com",
-    port: Number(process.env.EMAIL_PORT || 587),
-    secure: false,
-    auth: {
-      user,
-      pass,
-    },
+    host,
+    port,
+    family: 4,
+    secure: process.env.EMAIL_SECURE === "true" || port === 465,
+    auth: { user, pass },
   });
 }
 
 export async function sendEmail({ to, subject, html, text }) {
-  const transporter = getTransporter();
+  const apiKey = process.env.RESEND_API_KEY?.trim();
 
-  return transporter.sendMail({
-    from: `"Blood Donation System" <${process.env.EMAIL_USER}>`,
+  // Render Free blocks outbound SMTP ports. Resend uses HTTPS (port 443).
+  if (apiKey) {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM || "Blood Needer <onboarding@resend.dev>",
+        to: [to],
+        subject,
+        html,
+        text,
+      }),
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+      const error = new Error(`Resend rejected the email (${response.status}): ${details}`);
+      error.code = `RESEND_${response.status}`;
+      throw error;
+    }
+
+    return response.json();
+  }
+
+  return getSmtpTransporter().sendMail({
+    from: `"Blood Donation System" <${process.env.EMAIL_USER || process.env.GMAIL_USER}>`,
     to,
     subject,
-    text,
     html,
+    text,
   });
 }

@@ -17,8 +17,20 @@ connectDB();
 
 const app = express();
 
+const allowedOrigins = (process.env.FRONTEND_URLS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173','https://qr-frontend-z8fp-three.vercel.app'],
+  origin: (origin, callback) => {
+    // Allow server-to-server requests and local development without an Origin header.
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('CORS origin not allowed'));
+  },
   credentials: true
 }));
 app.use(express.json());
@@ -38,4 +50,11 @@ app.use("/api/badges", badgeRoutes);
 app.get("/", (req, res) => res.send("Blood Donation API Running"));
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// Vercel uses the exported Express app as a serverless function.
+// Keep the listener for local development only.
+export default app;
+
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+}

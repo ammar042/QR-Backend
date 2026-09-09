@@ -17,6 +17,11 @@
 
 // export default connectDB;
 import mongoose from 'mongoose';
+import dns from 'node:dns';
+
+// The local DNS resolver is refusing MongoDB Atlas SRV lookups. Use public
+// resolvers so mongodb+srv connection strings can resolve reliably.
+dns.setServers(['1.1.1.1', '8.8.8.8']);
 
 const connectDB = async () => {
   try {

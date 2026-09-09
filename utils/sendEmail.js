@@ -1,11 +1,16 @@
 import nodemailer from "nodemailer";
 
 function getSmtpTransporter() {
-  const user = (process.env.EMAIL_USER || process.env.GMAIL_USER)?.trim();
+  const user = (
+    process.env.EMAIL_USER ||
+    process.env.GMAIL_USER ||
+    process.env.SMTP_USER
+  )?.trim();
   const pass = (
     process.env.EMAIL_PASS ||
     process.env.EMAIL_PASSWORD ||
-    process.env.GMAIL_APP_PASSWORD
+    process.env.GMAIL_APP_PASSWORD ||
+    process.env.SMTP_PASS
   )?.trim();
 
   if (!user || !pass) {
@@ -14,10 +19,13 @@ function getSmtpTransporter() {
     throw error;
   }
 
-  const host = process.env.EMAIL_HOST || "smtp.gmail.com";
-  const port = Number(process.env.EMAIL_PORT || 587);
+  const host = process.env.EMAIL_HOST || process.env.SMTP_HOST || "smtp.gmail.com";
+  const port = Number(process.env.EMAIL_PORT || process.env.SMTP_PORT || 587);
 
-  if ((process.env.EMAIL_SERVICE || "").toLowerCase() === "gmail" || host === "smtp.gmail.com") {
+  if (
+    (process.env.EMAIL_SERVICE || process.env.SMTP_SERVICE || "").toLowerCase() === "gmail" ||
+    host === "smtp.gmail.com"
+  ) {
     return nodemailer.createTransport({
       service: "gmail",
       family: 4,
@@ -29,7 +37,10 @@ function getSmtpTransporter() {
     host,
     port,
     family: 4,
-    secure: process.env.EMAIL_SECURE === "true" || port === 465,
+    secure:
+      process.env.EMAIL_SECURE === "true" ||
+      process.env.SMTP_SECURE === "true" ||
+      port === 465,
     auth: { user, pass },
   });
 }
@@ -65,7 +76,7 @@ export async function sendEmail({ to, subject, html, text }) {
   }
 
   return getSmtpTransporter().sendMail({
-    from: `"Blood Donation System" <${process.env.EMAIL_USER || process.env.GMAIL_USER}>`,
+    from: `"Blood Donation System" <${process.env.EMAIL_USER || process.env.GMAIL_USER || process.env.SMTP_USER}>`,
     to,
     subject,
     html,

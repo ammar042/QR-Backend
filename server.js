@@ -17,20 +17,10 @@ connectDB();
 
 const app = express();
 
-const allowedOrigins = (process.env.FRONTEND_URLS || '')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow server-to-server requests and local development without an Origin header.
-    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    return callback(new Error('CORS origin not allowed'));
-  },
+  // Reflect the requesting origin so all browser origins are allowed.
+  // This is required when credentials are enabled; `*` is not valid with credentials.
+  origin: true,
   credentials: true
 }));
 app.use(express.json());

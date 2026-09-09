@@ -13,8 +13,6 @@ import badgeRoutes from "./routes/badgeRoutes.js";
 
 dotenv.config();
 
-connectDB();
-
 const app = express();
 
 app.use(cors({
@@ -25,6 +23,24 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Health check does not depend on MongoDB.
+app.get("/", (req, res) => res.send("Blood Donation API Running"));
+
+// Serverless invocations must wait for the shared MongoDB connection. Returning
+// an Express response here preserves CORS headers if Atlas is unavailable.
+app.use('/api', async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    console.error('Database unavailable:', error.message);
+    res.status(503).json({
+      success: false,
+      message: 'Database connection unavailable',
+    });
+  }
+});
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth',   authRoutes);
 app.use('/api/org',    orgRoutes);
@@ -34,10 +50,6 @@ app.use("/api/requests", bloodRequestRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/badges", badgeRoutes);
-
-
-// test
-app.get("/", (req, res) => res.send("Blood Donation API Running"));
 
 const PORT = process.env.PORT || 5000;
 

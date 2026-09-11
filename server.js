@@ -21,13 +21,13 @@ app.use(cors({
   origin: true,
   credentials: true
 }));
+
 app.use(express.json());
 
 // Health check does not depend on MongoDB.
 app.get("/", (req, res) => res.send("Blood Donation API Running"));
 
-// Serverless invocations must wait for the shared MongoDB connection. Returning
-// an Express response here preserves CORS headers if Atlas is unavailable.
+// Serverless invocations must wait for the shared MongoDB connection.
 app.use('/api', async (req, res, next) => {
   try {
     await connectDB();

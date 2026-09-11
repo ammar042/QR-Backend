@@ -32,6 +32,58 @@ export const loginAdmin = async (req, res) => {
   }
 };
 
+// POST /api/admin/bootstrap
+// One-time helper to create the admin account on whichever database this
+// deployment is actually connected to (production Vercel + MongoDB Atlas).
+// This fixes the classic "Invalid credentials" issue that happens when
+// `seed/seedAdmin.js` was only ever run against a local database instead
+// of the production MONGODB_URI.
+//
+// Protected by ADMIN_SEED_KEY (set this in Vercel → Project → Settings →
+// Environment Variables, then redeploy). Call it once, e.g.:
+//   POST https://your-backend.vercel.app/api/admin/bootstrap?key=YOUR_KEY
+// Body (all optional, defaults shown):
+//   { "name": "Super Admin", "email": "admin@bloodneeder.com", "password": "Admin@123" }
+// It is idempotent — if the admin already exists it just confirms that.
+export const bootstrapAdmin = async (req, res) => {
+  try {
+    const providedKey = req.query.key || req.body.key || req.headers["x-seed-key"];
+
+    if (!process.env.ADMIN_SEED_KEY) {
+      return res.status(500).json({
+        error: "ADMIN_SEED_KEY is not set on the server. Add it in your Vercel environment variables first.",
+      });
+    }
+
+    if (!providedKey || providedKey !== process.env.ADMIN_SEED_KEY) {
+      return res.status(401).json({ error: "Invalid or missing seed key." });
+    }
+
+    const email = (req.body.email || "admin@bloodneeder.com").toLowerCase();
+    const password = req.body.password || "Admin@123";
+    const name = req.body.name || "Super Admin";
+
+    const existing = await Admin.findOne({ email });
+    if (existing) {
+      return res.json({
+        success: true,
+        message: "Admin already exists — no changes made.",
+        admin: { id: existing._id, email: existing.email },
+      });
+    }
+
+    const admin = await Admin.create({ name, email, password });
+
+    res.status(201).json({
+      success: true,
+      message: "Admin created. You can now log in with this email/password.",
+      admin: { id: admin._id, email: admin.email },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 // GET /api/admin/overview
 export const getOverview = async (req, res) => {
   try {
@@ -109,9 +161,10 @@ export const getAdminReport = async (req, res) => {
       Organization.find(orgQuery).select(
         "organizationName address phone headName bloodStock dispenseHistory"
       ),
-      Donor.find(organizationId
-        ? { "linkedOrganizations.organization": organizationId }
-        : {}
+      Donor.find(
+        organizationId
+          ? { "linkedOrganizations.organization": organizationId }
+          : {}
       ).select("-password"),
     ]);
 
@@ -158,20 +211,29 @@ export const getAdminReport = async (req, res) => {
     dispenses.sort((a, b) => new Date(b.date) - new Date(a.date));
 
     const bloodGroups = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
-    const donationsByBloodGroup = Object.fromEntries(bloodGroups.map((bg) => [bg, 0]));
-    const dispensesByBloodGroup = Object.fromEntries(bloodGroups.map((bg) => [bg, 0]));
+    const donationsByBloodGroup = Object.fromEntries(
+      bloodGroups.map((bg) => [bg, 0])
+    );
+    const dispensesByBloodGroup = Object.fromEntries(
+      bloodGroups.map((bg) => [bg, 0])
+    );
+
     donations.forEach((d) => {
       if (donationsByBloodGroup[d.bloodGroup] !== undefined) {
         donationsByBloodGroup[d.bloodGroup] += d.units;
       }
     });
+
     dispenses.forEach((d) => {
       if (dispensesByBloodGroup[d.bloodGroup] !== undefined) {
         dispensesByBloodGroup[d.bloodGroup] += d.units;
       }
     });
 
-    const currentStock = Object.fromEntries(bloodGroups.map((bg) => [bg, 0]));
+    const currentStock = Object.fromEntries(
+      bloodGroups.map((bg) => [bg, 0])
+    );
+
     organizations.forEach((org) => {
       bloodGroups.forEach((bg) => {
         currentStock[bg] += org.bloodStock?.get(bg) || 0;
@@ -198,7 +260,8 @@ export const getAdminReport = async (req, res) => {
         totalMlRecorded: donations.reduce((sum, d) => sum + d.units, 0),
         totalDispenses: dispenses.length,
         totalMlDispensed: dispenses.reduce((sum, d) => sum + d.units, 0),
-        netStock: donations.reduce((sum, d) => sum + d.units, 0) -
+        netStock:
+          donations.reduce((sum, d) => sum + d.units, 0) -
           dispenses.reduce((sum, d) => sum + d.units, 0),
         donationsByBloodGroup,
         dispensesByBloodGroup,
